@@ -11,7 +11,7 @@ yarn
 cp .env.example .env # remplis GOOGLE_* et APP_JWT_SECRET
 yarn db:push
 yarn dev
-# Lier la chaîne: http://localhost:3000/api/oauth/start?clientId=CLIENT123
+# Lier la  chaîne: http://localhost:3000/api/oauth/start?clientId=CLIENT123
 ```
 
 ## Déploiement Railway (URL publique)
