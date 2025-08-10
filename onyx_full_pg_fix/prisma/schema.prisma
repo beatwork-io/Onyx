@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Client {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?
+  channels  Channel[]
+  presets   Json? // default title/desc/tags per client
+  createdAt DateTime @default(now())
+}
+
+model Channel {
+  id           String   @id // YouTube channelId
+  clientId     String
+  client       Client   @relation(fields: [clientId], references: [id])
+  title        String
+  refreshToken String   // OAuth refresh token
+  accessToken  String?  // last cached (optional)
+  tokenScope   String   // scopes granted
+  presets      Json?    // per-channel templates (title/desc/tags/playlist)
+  timezone     String?  // e.g. "Europe/Brussels"
+  createdAt    DateTime @default(now())
+}
+
+model Beat {
+  id           String   @id @default(cuid())
+  clientId     String
+  channelId    String
+  status       BeatStatus @default(QUEUED)
+  title        String
+  description  String
+  tags         String[]
+  playlistId   String?
+  beatStarsUrl String?
+  fileAudio    String    // path
+  fileCover    String?   // path
+  fileVideo    String?   // path (rendered)
+  bpm          Float?
+  key          String?
+  confidenceBpm Float? 
+  confidenceKey Float?
+  keyStrategy  String?  // tonal|808|mixed
+  publishAt    DateTime? // scheduled
+  privacyStatus String   @default("private")
+  youTubeVideoId String?
+  error        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+enum BeatStatus {
+  QUEUED
+  ANALYZING
+  RENDERING
+  UPLOADING
+  SCHEDULED
+  FAILED
+}
