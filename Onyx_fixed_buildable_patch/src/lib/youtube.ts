@@ -1,42 +1,28 @@
 import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
-import prisma from "./db"; // Import par défaut, plus { prisma }
+import fs from "fs";
+import prisma from "./db";
 
-const SCOPES = [
+/** Scopes YouTube nécessaires */
+export const SCOPES = [
   "https://www.googleapis.com/auth/youtube.upload",
   "https://www.googleapis.com/auth/youtube.readonly",
   "https://www.googleapis.com/auth/youtube",
 ];
 
-export function getOAuthClient(): OAuth2Client {
+/** Client OAuth2 Google (env requis) */
+export function oauthClient(): OAuth2Client {
   const clientId = process.env.GOOGLE_CLIENT_ID!;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET!;
   const redirectUri = process.env.GOOGLE_REDIRECT_URI!;
+  if (!clientId || !clientSecret || !redirectUri) {
+    throw new Error("Missing Google OAuth environment variables");
+  }
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 
-export async function uploadToYouTube(userId: string, videoPath: string, title: string, description: string) {
-  const account = await prisma.account.findFirst({
-    where: { userId, provider: "google" },
-  });
-
-  if (!account || !account.refresh_token) {
-    throw new Error("No linked YouTube account found for this user.");
-  }
-
-  const oauth2Client = getOAuthClient();
-  oauth2Client.setCredentials({ refresh_token: account.refresh_token });
-
-  const youtube = google.youtube({ version: "v3", auth: oauth2Client });
-
-  const res = await youtube.videos.insert({
-    part: ["snippet", "status"],
-    requestBody: {
-      snippet: { title, description },
-      status: { privacyStatus: "private" },
-    },
-    media: { body: videoPath },
-  });
-
-  return res.data;
-}
+/** Sauvegarde/maj des tokens sur le Channel du client */
+export async function saveTokensForChannel(params: {
+  clientId: string;
+  providerAccountId: string; // YouTube channel id
+  accessTok
