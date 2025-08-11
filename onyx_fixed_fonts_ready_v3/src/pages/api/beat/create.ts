@@ -1,70 +1,57 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import fs from "fs";
-import os from "os";
+import prisma from "@/lib/db"; // Import par défaut
 import formidable from "formidable";
-import { prisma } from "@/lib/db";
-import { defaultDescription, defaultTitle } from "@/lib/templates";
-import { nextAutoSlot } from "@/lib/autoslot";
-import { renderVideoToStream } from "@/lib/ffmpeg_stream";
-import { uploadAndSchedule } from "@/lib/youtube";
+import fs from "fs";
+import path from "path";
+import { uploadToYouTube } from "@/lib/youtube";
 
 export const config = { api: { bodyParser: false } };
 
-async function parseFormToBuffers(req: NextApiRequest): Promise<{ fields: any; audio: Buffer; cover?: Buffer | null; }>{
-  const form = formidable({ multiples: false, keepExtensions: true, uploadDir: os.tmpdir(), maxFileSize: 1024*1024*500 });
-  const { fields, files }: any = await new Promise((resolve, reject) => {
-    form.parse(req, (err, f, fl) => (err ? reject(err) : resolve({ fields: f, files: fl })));
-  });
-  const af = files?.audio?.[0] ?? files?.audio;
-  if (!af?.filepath) throw new Error("No audio buffer received");
-  const cf = files?.cover?.[0] ?? files?.cover;
-
-  const audio = fs.readFileSync(af.filepath);
-  const cover = cf?.filepath ? fs.readFileSync(cf.filepath) : null;
-
-  try { fs.unlinkSync(af.filepath); } catch {}
-  try { if (cf?.filepath) fs.unlinkSync(cf.filepath); } catch {}
-
-  return { fields, audio, cover };
-}
-
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== "POST") return res.status(405).end();
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
   try {
-    const { fields, audio, cover } = await parseFormToBuffers(req);
+    const form = formidable({ multiples: false });
+    form.parse(req, async (err, fields, files) => {
+      if (err) {
+        console.error("Form parse error:", err);
+        return res.status(500).json({ error: "File upload error" });
+      }
 
-    const clientId = String(fields.clientId);
-    const channelId = String(fields.channelId);
-    const beatName = String(fields.beatName || "Untitled");
-    const primaryType = String(fields.primaryType || "Type Beat");
-    const publishAtRaw = fields.publishAt ? new Date(String(fields.publishAt)) : null;
-    const autoSlot = String(fields.autoSlot || "true") === "true";
+      const { title, description, userId } = fields;
+      const file = files.file as formidable.File;
 
-    let beat = await prisma.beat.create({ data: { clientId, channelId, title: "", description: "", tags: [], fileAudio: "", fileCover: "", status: "ANALYZING" } });
+      if (!file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
 
-    const title = defaultTitle({ PrimaryType: primaryType, BeatName: beatName });
-    const description = defaultDescription({ PrimaryType: primaryType, BeatName: beatName, BPM: null, Key: null, BeatStarsURL: null, Email: "contact@example.com", Hashtags: ["typebeat"] });
-    beat = await prisma.beat.update({ where: { id: beat.id }, data: { title, description, status: "RENDERING" } });
+      const tempPath = file.filepath;
+      const videoBuffer = fs.createReadStream(tempPath);
 
-    const mp4Stream = renderVideoToStream({ audioBuffer: audio, coverBuffer: cover ?? null, titleOverlay: `${primaryType} — ${beatName}` });
+      // Sauvegarde dans la base
+      const beat = await prisma.beat.create({
+        data: {
+          title: String(title),
+          description: String(description),
+          fileUrl: tempPath,
+          userId: String(userId),
+        },
+      });
 
-    let publishAt: Date;
-    if (publishAtRaw && !isNaN(publishAtRaw.getTime())) {
-      publishAt = publishAtRaw;
-    } else if (autoSlot) {
-      const scheduled = await prisma.beat.findMany({ where: { channelId, publishAt: { not: null } }, select: { publishAt: true } });
-      publishAt = nextAutoSlot(scheduled.map(s => s.publishAt!));
-    } else {
-      publishAt = new Date(Date.now() + 48 * 3600 * 1000);
-    }
+      // Upload sur YouTube
+      const youtubeRes = await uploadToYouTube(
+        String(userId),
+        videoBuffer as any,
+        String(title),
+        String(description)
+      );
 
-    const videoId = await uploadAndSchedule({ channelId, file: mp4Stream, title, description, tags: [], publishAt, playlistId: undefined });
-
-    beat = await prisma.beat.update({ where: { id: beat.id }, data: { youTubeVideoId: videoId, publishAt, status: "SCHEDULED" } });
-
-    res.json({ ok: true, beat });
-  } catch (e: any) {
-    console.error(e);
-    res.status(500).json({ ok: false, error: String(e?.message || e) });
+      res.status(200).json({ success: true, beat, youtubeRes });
+    });
+  } catch (error) {
+    console.error("Beat creation error:", error);
+    res.status(500).json({ error: "Server error" });
   }
 }
