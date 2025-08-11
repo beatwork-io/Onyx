@@ -5,10 +5,8 @@ import path from "path";
 import ffmpegPath from "ffmpeg-static";
 
 /**
- * Rend une vidéo MP4 (cover + waveform + texte optionnel) en STREAM (stdout).
- * - Police optionnelle à /app/public/fonts/SF-Pro-Display-Bold.ttf
- * - Si la police manque, on désactive le texte pour éviter Fontconfig errors.
- * - mp4 H.264/AAC yuv420p +faststart (YouTube friendly)
+ * Rend un MP4 (cover + waveform). Texte désactivé TEMPORAIREMENT pour éviter tout blocage.
+ * YouTube-friendly: H.264/AAC yuv420p +faststart.
  */
 export function renderVideoToStream({
   audioBuffer,
@@ -21,23 +19,14 @@ export function renderVideoToStream({
 }): NodeJS.ReadableStream {
   const hasCover = !!coverBuffer;
 
-  // Police (optionnelle)
-  const fontPath = "/app/public/fonts/SF-Pro-Display-Bold.ttf";
-  const hasFont = fs.existsSync(fontPath);
-
-  // Titre dans fichier temporaire (évite échappements et "Both text and text file provided")
+  // (désactivé) Police / drawtext
   const titleFile = path.join(os.tmpdir(), `onyx_title_${Date.now()}.txt`);
   fs.writeFileSync(titleFile, titleOverlay, { encoding: "utf8" });
+  const drawText = ""; // <— pas de texte pour stabiliser
 
-  // Inputs
   const inputs = hasCover
     ? ["-f", "mp3", "-i", "pipe:3", "-f", "image2pipe", "-i", "pipe:4"]
     : ["-f", "mp3", "-i", "pipe:3", "-f", "lavfi", "-i", "color=size=1920x1080:rate=25:color=black"];
-
-  // Filter
-  const drawText = hasFont
-    ? `,drawtext=fontfile=${fontPath}:textfile=${titleFile}:x=(w-text_w)/2:y=80:fontsize=48:fontcolor=white:shadowcolor=black:shadowx=2:shadowy=2`
-    : "";
 
   const vf = [
     `[1:v]scale=1920:1080[bg]`,
@@ -66,18 +55,16 @@ export function renderVideoToStream({
   const bin = (ffmpegPath as string) || "ffmpeg";
   const ff = spawn(bin, args as any, { stdio });
 
-  // push buffers
   (ff.stdio[3] as any).write(audioBuffer);
   (ff.stdio[3] as any).end();
   if (hasCover && ff.stdio[4]) {
     (ff.stdio[4] as any).write(coverBuffer as Buffer);
     (ff.stdio[4] as any).end();
+  } else {
+    try { (ff.stdio[4] as any).end(); } catch {}
   }
 
-  // cleanup
-  ff.on("close", () => {
-    try { fs.unlinkSync(titleFile); } catch {}
-  });
+  ff.on("close", () => { try { fs.unlinkSync(titleFile); } catch {} });
 
   return ff.stdout as NodeJS.ReadableStream;
 }
