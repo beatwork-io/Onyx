@@ -1,1 +1,0 @@
-import { addDays,setHours,setMinutes,setSeconds,isBefore } from 'date-fns'; export function nextAutoSlot(existing:Date[], now=new Date()){ let d=setSeconds(setMinutes(setHours(now,18),0),0); if(isBefore(d,now)) d=addDays(d,1); const taken=new Set(existing.map(x=>+x)); while(taken.has(+d)) d=addDays(d,1); return d; }
