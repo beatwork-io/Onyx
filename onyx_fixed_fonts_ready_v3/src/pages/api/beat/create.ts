@@ -1,4 +1,3 @@
-// src/pages/api/beat/create.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import fs from "fs";
 import os from "os";
@@ -11,8 +10,7 @@ import { uploadAndSchedule } from "@/lib/youtube";
 
 export const config = { api: { bodyParser: false } };
 
-async function parseFormToBuffers(req: NextApiRequest): Promise<{ fields: any; audio: Buffer; cover?: Buffer|null; filename?: string }>
-{
+async function parseFormToBuffers(req: NextApiRequest): Promise<{ fields: any; audio: Buffer; cover?: Buffer|null; filename?: string }>{
   const form = formidable({ multiples: false, keepExtensions: true, uploadDir: os.tmpdir(), maxFileSize: 1024*1024*500 });
   const { fields, files }: any = await new Promise((resolve, reject) => {
     form.parse(req, (err, f, fl) => (err ? reject(err) : resolve({ fields: f, files: fl })));
@@ -32,6 +30,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== "POST") return res.status(405).end();
   try {
     const { fields, audio, cover } = await parseFormToBuffers(req);
+
     const clientId = String(fields.clientId);
     const channelId = String(fields.channelId);
     const beatName = String(fields.beatName || "Untitled");
@@ -43,10 +42,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const title = defaultTitle({ PrimaryType: primaryType, BeatName: beatName });
     const description = defaultDescription({ PrimaryType: primaryType, BeatName: beatName, BPM: null, Key: null, BeatStarsURL: null, Email: "contact@example.com", Hashtags: ["typebeat"] });
+
     beat = await prisma.beat.update({ where: { id: beat.id }, data: { title, description, status: "RENDERING" }});
 
     const videoStream = renderVideoToStream({ audioBuffer: audio, coverBuffer: cover ?? null, titleOverlay: `${primaryType} — ${beatName}` });
 
+    // publishAt toujours valide
     let publishAt: Date;
     if (publishAtRaw && !isNaN(publishAtRaw.getTime())) {
       publishAt = publishAtRaw;
@@ -58,7 +59,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const videoId = await uploadAndSchedule({ channelId, file: videoStream, title, description, tags: [], publishAt, playlistId: undefined });
+
     beat = await prisma.beat.update({ where: { id: beat.id }, data: { youTubeVideoId: videoId, publishAt, status: "SCHEDULED" }});
+
     res.json({ ok: true, beat });
   } catch (e: any) {
     console.error(e);
